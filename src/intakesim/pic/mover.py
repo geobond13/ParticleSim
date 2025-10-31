@@ -414,7 +414,7 @@ def apply_reflecting_bc_1d(x, v, active, x_min, x_max, n_particles):
 
 
 @numba.njit
-def calculate_electron_temperature_eV(v, active, species_id, n_particles):
+def calculate_electron_temperature_eV(v, active, species_id, n_particles, electron_id=8):
     """
     Calculate electron temperature from velocity distribution.
 
@@ -426,18 +426,22 @@ def calculate_electron_temperature_eV(v, active, species_id, n_particles):
         active: Particle active flags [n_particles]
         species_id: Particle species IDs [n_particles]
         n_particles: Number of particles
+        electron_id: Species ID for electrons (default: 8)
 
     Returns:
         T_e_eV: Electron temperature [eV]
-    """
-    ELECTRON_ID = 0  # Electrons are species 0
 
+    Note:
+        Electron species ID is 8 in the current SPECIES definition.
+        This was hardcoded as 0 in Week 11, causing T_e to always return floor value.
+        Fixed in Week 12.
+    """
     # Accumulate <v²> for electrons
     v_sq_sum = 0.0
     n_electrons = 0
 
     for i in range(n_particles):
-        if active[i] and species_id[i] == ELECTRON_ID:
+        if active[i] and species_id[i] == electron_id:
             v_sq = v[i, 0]**2 + v[i, 1]**2 + v[i, 2]**2
             v_sq_sum += v_sq
             n_electrons += 1

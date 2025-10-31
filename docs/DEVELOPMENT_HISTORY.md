@@ -683,6 +683,113 @@ Implement proper sheath boundary conditions with:
 
 ---
 
+### Week 12 (Oct 31, 2025) - Timestep Study & Sheath Validation ✅ CRITICAL FINDINGS
+
+**Objectives:**
+- Identify stable timestep for PIC simulation via systematic study
+- Validate sheath BC against analytical solutions
+- Resolve numerical heating issue discovered in Week 11
+
+**Phase 1: Timestep Reduction Study (`examples/14_timestep_study.py`)**
+
+**Test Matrix:**
+- Timesteps tested: [50ps, 20ps, 10ps, 5ps, 2ps, 1ps]
+- Test conditions: 500 electrons at 10 eV, sheath BC, no RF/MCC/SEE
+- Duration: 100 timesteps per test
+- Stability criterion: T_e growth <10%
+
+**Results:**
+
+| Timestep | Initial T_e | Final T_e | Growth    | Status        |
+|----------|-------------|-----------|-----------|---------------|
+| 50ps     | 6.67 eV     | 19.24 eV  | 188.6%    | [X] UNSTABLE  |
+| 20ps     | 6.67 eV     | 552.15 eV | 8,182%    | [X] UNSTABLE  |
+| 10ps     | 6.67 eV     | 1,992 eV  | 29,779%   | [X] UNSTABLE  |
+| 5ps      | 6.67 eV     | 5,118 eV  | 76,665%   | [X] UNSTABLE  |
+| 2ps      | 6.67 eV     | 7,132 eV  | 106,880%  | [X] UNSTABLE  |
+| 1ps      | 6.67 eV     | 3,177 eV  | 47,559%   | [X] UNSTABLE  |
+
+**❌ CRITICAL FINDING: NO STABLE TIMESTEP FOUND**
+
+**Conclusion:** Reducing timestep alone will NOT solve numerical heating problem. Even dt=1ps shows 47,559% temperature growth. This proves the fundamental issue is NOT timestep-related but requires:
+- E-field limiter during startup
+- Implicit field solver
+- Energy-conserving particle push scheme
+
+**Phase 2: Sheath BC Validation (`examples/15_child_langmuir.py`)**
+
+**Critical Bug Fixes Discovered:**
+
+1. **Electron Temperature Calculation Bug** (`src/intakesim/pic/mover.py`)
+   - **Bug**: `calculate_electron_temperature_eV()` hardcoded `electron_id=0`
+   - **Reality**: Electrons are `species_id=8` in SPECIES mapping
+   - **Impact**: All Week 11 sheath BC tests returned T_e=0.10 eV (floor value)
+   - **Fix**: Changed to `electron_id=8` as function parameter
+   - **Status**: ✅ Fixed
+
+2. **Maxwell-Boltzmann Initialization Bug** (both benchmark scripts)
+   - **Bug**: `v_seed = np.random.randn(n_seed, 3) * v_thermal / np.sqrt(3)`
+   - **Impact**: Dividing by sqrt(3) reduced temperature by factor of 3
+   - **Reality**: For 3D MB, each component has variance σ² = kT/m
+   - **Fix**: `v_seed = np.random.randn(n_seed, 3) * v_thermal`
+   - **Status**: ✅ Fixed
+
+**Sheath BC Validation Results (After Bug Fixes):**
+
+✅ **Temperature Correct:**
+- T_e = 6.96-7.67 eV (target: 7.0 eV) → Within 10%
+
+✅ **Sheath Potential Correct:**
+- V_sheath = 31.3-34.5 V
+- Analytical: V_sheath = 4.5 × T_e = 31.5 V
+- Agreement: Within 10%
+
+✅ **Energy-Dependent Absorption Working:**
+- Particles absorbed when E > eV_sheath
+- Current density measured: j ~ 600-1,300 A/m²
+- Current nearly independent of applied voltage (j ∝ V^0.06)
+
+**Key Insight:**
+The test is NOT a valid Child-Langmuir benchmark (which requires cathode emission), but successfully validates **thermal plasma confinement** physics:
+- Sheath BC correctly calculates V_sheath from T_e
+- Energy-dependent reflection/absorption works
+- Current limited by thermal flux (correct for bulk plasma)
+
+**Impact on Week 11 Results:**
+- Week 11 sheath BC unit tests were valid (tested physics correctly)
+- Week 11 integration testing was INVALID (wrong T_e calculation)
+- Sheath BC code itself is correct, but needs re-validation with fixed T_e
+
+**Key Files Modified:**
+- `src/intakesim/pic/mover.py`: Fixed `calculate_electron_temperature_eV()` electron_id bug
+- `examples/14_timestep_study.py`: Created timestep study (294 lines), fixed MB initialization
+- `examples/15_child_langmuir.py`: Created sheath validation (295 lines), fixed MB initialization
+- `timestep_study.png`: Visualization showing all timesteps unstable
+- `child_langmuir_benchmark.png`: Visualization showing sheath BC validation
+
+**Validation Status:**
+- ✅ Sheath BC physics validated (V_sheath = 4.5 × T_e)
+- ✅ Energy-dependent absorption working
+- ✅ Temperature calculation fixed
+- ✅ MB initialization fixed
+- ❌ Timestep instability unresolved (requires fundamental PIC changes)
+
+**Week 12 Status: ✅ VALIDATION COMPLETE, ⚠️ NUMERICAL HEATING UNRESOLVED**
+
+**Critical Decision Point:**
+Original Week 12 plan assumed timestep reduction would solve numerical heating. Results prove this assumption wrong. Need to decide on path forward:
+- **Option A**: Implement E-field limiter (3-5 days)
+- **Option B**: Implicit field solver (1-2 weeks)
+- **Option C**: Document limitation and proceed with applications within valid regime
+- **Option D**: Pause PIC development, focus on DSMC-only validation
+
+**Time Investment:** ~4 hours
+- Timestep study: 2 hours
+- Sheath validation: 1.5 hours
+- Bug fixes and re-runs: 0.5 hours
+
+---
+
 ## Major Decisions Log
 
 ### Decision #1: Physics Model Corrections (Oct 29, 2025)
@@ -940,6 +1047,7 @@ Implement proper sheath boundary conditions with:
 - **Oct 31, 2025**: GitHub repository created (ParticleSim)
 - **Oct 31, 2025**: Week 10 complete (Reflecting BC implementation, 10/10 tests passing)
 - **Oct 31, 2025**: Week 11 complete (Sheath BC implementation, 13/13 tests passing, reveals PIC numerical heating issue)
+- **Oct 31, 2025**: Week 12 complete (Timestep study + sheath validation, critical bugs fixed, numerical heating persists across all timesteps)
 
 ---
 
