@@ -1,9 +1,13 @@
 # IntakeSIM Development Progress
 
+> **⚠️ DEPRECATED:** This file is maintained for historical reference only.
+>
+> **For current project status and complete development history, see [docs/DEVELOPMENT_HISTORY.md](docs/DEVELOPMENT_HISTORY.md)**
+
 **Project**: Air-Breathing Electric Propulsion (ABEP) Particle Simulation
 **Organization**: AeriSat Systems
 **Lead**: George Boyce, CTO
-**Status**: Phase 1 - DSMC Core Development (Week 1 Complete)
+**Status**: Week 9 Complete (October 31, 2025) - PIC Core Validated
 
 ---
 
