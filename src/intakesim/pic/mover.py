@@ -346,6 +346,69 @@ def apply_periodic_bc_1d(x, active, x_min, x_max, n_particles):
             x[i, 0] -= L
 
 
+@numba.njit
+def apply_reflecting_bc_1d(x, v, active, x_min, x_max, n_particles):
+    """
+    Apply reflecting boundary conditions: specular reflection at walls.
+
+    Implements simple elastic reflection where particles bounce off walls
+    with reversed velocity component normal to the wall.
+
+    Physics:
+        - Position mirrored: x_new = 2*x_wall - x_old
+        - Velocity reversed: v_new = -v_old (in x-direction only)
+        - Energy conserved: |v_new| = |v_old|
+
+    Note:
+        This is a simplified model. Real plasma-wall interactions include:
+        - Thermal accommodation (velocity thermalization to wall temperature)
+        - Secondary electron emission (SEE)
+        - Sheath potential (energy-dependent reflection)
+
+        For physically accurate discharge simulations, use proper sheath
+        boundary conditions (see apply_sheath_bc_1d, future implementation).
+
+    Args:
+        x: Particle positions [n_particles, 3] [m] (modified in-place)
+        v: Particle velocities [n_particles, 3] [m/s] (modified in-place)
+        active: Particle active flags [n_particles]
+        x_min: Domain minimum [m]
+        x_max: Domain maximum [m]
+        n_particles: Number of particles
+
+    Returns:
+        n_reflected: Number of reflections (for diagnostics)
+
+    Example:
+        >>> # Electron hits left wall
+        >>> x[i, 0] = -0.001  # 1 mm beyond boundary
+        >>> v[i, 0] = -1000   # Moving left
+        >>> apply_reflecting_bc_1d(...)
+        >>> # Result: x[i, 0] = 0.001, v[i, 0] = +1000 (bounces back)
+    """
+    n_reflected = 0
+
+    for i in range(n_particles):
+        if not active[i]:
+            continue
+
+        x_p = x[i, 0]
+
+        # Left wall reflection
+        if x_p < x_min:
+            x[i, 0] = 2.0 * x_min - x_p  # Mirror position
+            v[i, 0] = -v[i, 0]            # Reverse x-velocity
+            n_reflected += 1
+
+        # Right wall reflection
+        elif x_p > x_max:
+            x[i, 0] = 2.0 * x_max - x_p  # Mirror position
+            v[i, 0] = -v[i, 0]            # Reverse x-velocity
+            n_reflected += 1
+
+    return n_reflected
+
+
 # ==================== MAIN INTEGRATION FUNCTION ====================
 
 
@@ -366,12 +429,17 @@ def push_pic_particles_1d(
         particles: ParticleArrayNumba instance
         mesh: Mesh1DPIC instance
         dt: Timestep [s]
-        boundary_condition: "absorbing" or "periodic"
+        boundary_condition: "absorbing", "periodic", or "reflecting"
+            - "absorbing": Particles removed at walls (default)
+            - "periodic": Particles wrap around domain
+            - "reflecting": Specular reflection at walls (v_x reversed)
         phi_left: Boundary potential at left wall [V] (default: 0.0)
         phi_right: Boundary potential at right wall [V] (default: 0.0)
 
     Returns:
-        diagnostics: dict with n_absorbed, etc.
+        diagnostics: dict with keys:
+            - n_absorbed: Number of particles absorbed (absorbing BC only)
+            - n_reflected: Number of reflections (reflecting BC only)
     """
     from .field_solver import solve_fields_1d
 
@@ -438,15 +506,27 @@ def push_pic_particles_1d(
             mesh.x_max,
             n_particles,
         )
+        n_reflected = 0
     elif boundary_condition == "periodic":
         apply_periodic_bc_1d(
             particles.x, particles.active, mesh.x_min, mesh.x_max, n_particles
         )
         n_absorbed = 0
+        n_reflected = 0
+    elif boundary_condition == "reflecting":
+        n_reflected = apply_reflecting_bc_1d(
+            particles.x,
+            particles.v,
+            particles.active,
+            mesh.x_min,
+            mesh.x_max,
+            n_particles,
+        )
+        n_absorbed = 0
     else:
         raise ValueError(f"Unknown boundary condition: {boundary_condition}")
 
-    return {"n_absorbed": n_absorbed}
+    return {"n_absorbed": n_absorbed, "n_reflected": n_reflected}
 
 
 # ==================== TESTING UTILITIES ====================

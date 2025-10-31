@@ -314,7 +314,7 @@ for step in range(n_steps + 1):
     if step < n_steps:
         push_diagnostics = push_pic_particles_1d(
             particles, mesh, dt,
-            boundary_condition="periodic",  # Keep electrons in domain (TODO: implement proper sheath)
+            boundary_condition="reflecting",  # Specular reflection (Week 10: simple reflecting BC)
             phi_left=0.0,
             phi_right=0.0
         )
