@@ -282,6 +282,13 @@ def record_snapshot(time, particles, plasma_params, P_RF_actual, mcc_diag):
 
 # ==================== TIME LOOP ====================
 
+# Debug: Check true initial T_e before time loop
+initial_plasma_params = calculate_plasma_parameters(particles, mesh)
+print(f"DEBUG - True initial conditions (before time loop):")
+print(f"  n_e = {initial_plasma_params['n_e']:.2e} m^-3")
+print(f"  T_e = {initial_plasma_params['T_e']:.2f} eV")
+print()
+
 print("Running ABEP ionization chamber simulation...")
 print()
 
@@ -290,45 +297,45 @@ P_RF_actual_avg = 0.0
 
 for step in range(n_steps + 1):
 
-    # Apply effective RF heating (periodic)
+    # Apply effective RF heating (periodic) - disabled for Week 11 sheath BC testing
     P_RF_actual = 0.0
-    if step < n_steps and step % rf_heat_interval == 0:
-        P_RF_actual = apply_effective_rf_heating(particles, P_RF_target, dt, volume)
-        P_RF_actual_avg = 0.9 * P_RF_actual_avg + 0.1 * P_RF_actual  # Exponential average
+    # if step < n_steps and step % rf_heat_interval == 0:
+    #     P_RF_actual = apply_effective_rf_heating(particles, P_RF_target, dt, volume)
+    #     P_RF_actual_avg = 0.9 * P_RF_actual_avg + 0.1 * P_RF_actual  # Exponential average
 
-    # MCC collisions
-    if step < n_steps:
-        mcc_diagnostics = apply_mcc_collisions(
-            particles,
-            neutral_species,
-            n_neutral,
-            dt,
-            max_new_particles=2000
-        )
-        total_ionizations += mcc_diagnostics['n_ionization']
-    else:
-        mcc_diagnostics = {'n_ionization': 0, 'n_excitation': 0, 'n_elastic': 0,
-                          'n_collisions_total': 0, 'n_new_electrons': 0, 'n_new_ions': 0}
+    # MCC collisions (disabled for Week 11 sheath BC testing)
+    # if step < n_steps:
+    #     mcc_diagnostics = apply_mcc_collisions(
+    #         particles,
+    #         neutral_species,
+    #         n_neutral,
+    #         dt,
+    #         max_new_particles=2000
+    #     )
+    #     total_ionizations += mcc_diagnostics['n_ionization']
+    # else:
+    mcc_diagnostics = {'n_ionization': 0, 'n_excitation': 0, 'n_elastic': 0,
+                      'n_collisions_total': 0, 'n_new_electrons': 0, 'n_new_ions': 0}
 
     # PIC push
     if step < n_steps:
         push_diagnostics = push_pic_particles_1d(
             particles, mesh, dt,
-            boundary_condition="reflecting",  # Specular reflection (Week 10: simple reflecting BC)
+            boundary_condition="sheath",  # Week 11: Energy-dependent sheath BC
             phi_left=0.0,
             phi_right=0.0
         )
 
-    # SEE at walls
-    if step < n_steps:
-        see_diagnostics = apply_see_boundary_conditions(
-            particles, mesh,
-            material=wall_material,
-            max_new_particles=1000
-        )
-    else:
-        see_diagnostics = {'n_electrons_absorbed': 0, 'n_ions_absorbed': 0,
-                          'n_secondaries_created': 0, 'mean_see_yield': 0.0}
+    # SEE at walls (disabled when using sheath BC)
+    # if step < n_steps:
+    #     see_diagnostics = apply_see_boundary_conditions(
+    #         particles, mesh,
+    #         material=wall_material,
+    #         max_new_particles=1000
+    #     )
+    # else:
+    see_diagnostics = {'n_electrons_absorbed': 0, 'n_ions_absorbed': 0,
+                      'n_secondaries_created': 0, 'mean_see_yield': 0.0}
 
     # Calculate plasma parameters
     plasma_params = calculate_plasma_parameters(particles, mesh)

@@ -14,7 +14,8 @@ Reference:
 
 import numpy as np
 import numba
-from ..constants import SPECIES, ID_TO_SPECIES
+from ..constants import SPECIES, ID_TO_SPECIES, e, m_e
+from .surfaces import apply_sheath_bc_1d
 
 
 # ==================== TSC WEIGHTING FUNCTIONS ====================
@@ -409,6 +410,54 @@ def apply_reflecting_bc_1d(x, v, active, x_min, x_max, n_particles):
     return n_reflected
 
 
+# ==================== HELPER FUNCTIONS ====================
+
+
+@numba.njit
+def calculate_electron_temperature_eV(v, active, species_id, n_particles):
+    """
+    Calculate electron temperature from velocity distribution.
+
+    T_e = (m_e / 3k) * <v²> [K]
+    T_e [eV] = (m_e / (3 * e)) * <v²> [eV]
+
+    Args:
+        v: Particle velocities [n_particles, 3] [m/s]
+        active: Particle active flags [n_particles]
+        species_id: Particle species IDs [n_particles]
+        n_particles: Number of particles
+
+    Returns:
+        T_e_eV: Electron temperature [eV]
+    """
+    ELECTRON_ID = 0  # Electrons are species 0
+
+    # Accumulate <v²> for electrons
+    v_sq_sum = 0.0
+    n_electrons = 0
+
+    for i in range(n_particles):
+        if active[i] and species_id[i] == ELECTRON_ID:
+            v_sq = v[i, 0]**2 + v[i, 1]**2 + v[i, 2]**2
+            v_sq_sum += v_sq
+            n_electrons += 1
+
+    if n_electrons == 0:
+        return 0.1  # Fallback to avoid division by zero
+
+    # Mean square velocity
+    v_sq_mean = v_sq_sum / n_electrons
+
+    # Temperature in eV: T = (m_e / (3 * e)) * <v²>
+    T_e_eV = (m_e / (3.0 * e)) * v_sq_mean
+
+    # Floor at 0.1 eV (avoid numerical issues)
+    if T_e_eV < 0.1:
+        T_e_eV = 0.1
+
+    return T_e_eV
+
+
 # ==================== MAIN INTEGRATION FUNCTION ====================
 
 
@@ -429,17 +478,19 @@ def push_pic_particles_1d(
         particles: ParticleArrayNumba instance
         mesh: Mesh1DPIC instance
         dt: Timestep [s]
-        boundary_condition: "absorbing", "periodic", or "reflecting"
+        boundary_condition: "absorbing", "periodic", "reflecting", or "sheath"
             - "absorbing": Particles removed at walls (default)
             - "periodic": Particles wrap around domain
             - "reflecting": Specular reflection at walls (v_x reversed)
+            - "sheath": Energy-dependent sheath boundary (realistic plasma-wall)
         phi_left: Boundary potential at left wall [V] (default: 0.0)
         phi_right: Boundary potential at right wall [V] (default: 0.0)
 
     Returns:
         diagnostics: dict with keys:
-            - n_absorbed: Number of particles absorbed (absorbing BC only)
-            - n_reflected: Number of reflections (reflecting BC only)
+            - n_absorbed: Number of particles absorbed
+            - n_reflected: Number of reflections (reflecting or sheath BC)
+            - T_e_eV: Electron temperature [eV] (sheath BC only)
     """
     from .field_solver import solve_fields_1d
 
@@ -507,12 +558,14 @@ def push_pic_particles_1d(
             n_particles,
         )
         n_reflected = 0
+        T_e_eV = None
     elif boundary_condition == "periodic":
         apply_periodic_bc_1d(
             particles.x, particles.active, mesh.x_min, mesh.x_max, n_particles
         )
         n_absorbed = 0
         n_reflected = 0
+        T_e_eV = None
     elif boundary_condition == "reflecting":
         n_reflected = apply_reflecting_bc_1d(
             particles.x,
@@ -523,10 +576,41 @@ def push_pic_particles_1d(
             n_particles,
         )
         n_absorbed = 0
+        T_e_eV = None
+    elif boundary_condition == "sheath":
+        # Calculate electron temperature for self-consistent sheath
+        T_e_eV = calculate_electron_temperature_eV(
+            particles.v,
+            particles.active,
+            particles.species_id,
+            n_particles,
+        )
+
+        # Apply sheath boundary with energy-dependent reflection
+        # Need ion mass for distinction (use N2+ as default)
+        m_ion = 28 * 1.661e-27  # kg (N2+ molecular mass)
+
+        n_reflected, n_absorbed = apply_sheath_bc_1d(
+            particles.x,
+            particles.v,
+            particles.active,
+            particles.species_id,
+            particles.weight,
+            mesh.x_min,
+            mesh.x_max,
+            n_particles,
+            T_e_eV,
+            m_ion,
+            bohm_factor=4.5,
+        )
     else:
         raise ValueError(f"Unknown boundary condition: {boundary_condition}")
 
-    return {"n_absorbed": n_absorbed, "n_reflected": n_reflected}
+    diagnostics = {"n_absorbed": n_absorbed, "n_reflected": n_reflected}
+    if T_e_eV is not None:
+        diagnostics["T_e_eV"] = T_e_eV
+
+    return diagnostics
 
 
 # ==================== TESTING UTILITIES ====================

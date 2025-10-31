@@ -938,6 +938,8 @@ Implement proper sheath boundary conditions with:
 - **Oct 30, 2025**: Phase 2 complete (multi-channel honeycomb, eta_c = 0.635)
 - **Oct 30, 2025**: Week 9 complete (PIC core + ABEP chamber framework)
 - **Oct 31, 2025**: GitHub repository created (ParticleSim)
+- **Oct 31, 2025**: Week 10 complete (Reflecting BC implementation, 10/10 tests passing)
+- **Oct 31, 2025**: Week 11 complete (Sheath BC implementation, 13/13 tests passing, reveals PIC numerical heating issue)
 
 ---
 

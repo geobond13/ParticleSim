@@ -438,6 +438,144 @@ def apply_see_boundary_conditions(
     }
 
 
+# ==================== SHEATH BOUNDARY CONDITIONS ====================
+
+def calculate_sheath_potential(T_e_eV, bohm_factor=4.5):
+    """
+    Calculate sheath potential drop at plasma-wall interface.
+
+    The sheath is a thin region near walls where ions are accelerated
+    and electrons are repelled, maintaining quasi-neutrality in the bulk plasma.
+
+    Physics:
+        V_sheath ≈ (k*T_e) / e * ln(sqrt(m_i / (2*pi*m_e)))
+
+        For typical plasma conditions, this evaluates to:
+        V_sheath ≈ 4.0-5.0 × T_e [V]
+
+        The Bohm criterion requires ions enter the sheath at the Bohm velocity.
+        Electrons with E < e*V_sheath are reflected; those with E >= e*V_sheath
+        are absorbed.
+
+    Args:
+        T_e_eV: Electron temperature [eV]
+        bohm_factor: Multiplier for V_sheath (default: 4.5, typical for capacitive discharges)
+
+    Returns:
+        V_sheath: Sheath potential [V]
+
+    References:
+        Lieberman & Lichtenberg, "Principles of Plasma Discharges" (2005)
+        Child-Langmuir sheath theory
+    """
+    V_sheath = bohm_factor * T_e_eV
+    return V_sheath
+
+
+@numba.njit
+def apply_sheath_bc_1d(x, v, active, species_id, weight, x_min, x_max, n_particles, T_e_eV, m_ion, bohm_factor=4.5):
+    """
+    Apply energy-dependent sheath boundary conditions in 1D.
+
+    This models the plasma sheath at walls more realistically than simple
+    reflection or absorption:
+
+    Physics:
+        1. Calculate sheath potential: V_sheath = bohm_factor × T_e [V]
+
+        2. For electrons hitting walls:
+           - If E_kinetic < e*V_sheath: REFLECT (cannot overcome potential barrier)
+           - If E_kinetic >= e*V_sheath: ABSORB (escape to wall)
+
+        3. For ions hitting walls:
+           - All ions ABSORBED (attracted by sheath)
+           - Ions gain energy falling through sheath
+
+    This creates an energy sink for high-energy electrons, preventing
+    temperature runaway while maintaining plasma density.
+
+    Expected behavior:
+        - Low T_e → small V_sheath → more electrons absorbed → T_e drops
+        - High T_e → large V_sheath → fewer electrons absorbed → T_e stabilizes
+        - Self-regulating feedback loop → T_e converges to steady state
+
+    Args:
+        x: Particle positions [n_particles, 3] [m] (modified in-place)
+        v: Particle velocities [n_particles, 3] [m/s] (modified in-place)
+        active: Particle active flags [n_particles] (modified in-place)
+        species_id: Particle species IDs [n_particles]
+        weight: Particle weights [n_particles]
+        x_min: Domain minimum [m]
+        x_max: Domain maximum [m]
+        n_particles: Number of particles
+        T_e_eV: Electron temperature [eV]
+        m_ion: Ion mass [kg] (for distinction, though ions always absorbed)
+        bohm_factor: Sheath potential multiplier (default: 4.5)
+
+    Returns:
+        n_reflected: Number of electrons reflected
+        n_absorbed: Number of particles absorbed (electrons + ions)
+
+    References:
+        Lieberman & Lichtenberg (2005), Ch. 6
+        Turner benchmark (2013) - CCP discharge validation
+    """
+    # Calculate sheath potential
+    V_sheath = bohm_factor * T_e_eV  # [V]
+    E_barrier = V_sheath * e  # [J]
+
+    n_reflected = 0
+    n_absorbed = 0
+
+    # Electron species ID (assume electrons are species 0)
+    ELECTRON_ID = 0
+
+    for i in range(n_particles):
+        if not active[i]:
+            continue
+
+        x_p = x[i, 0]
+
+        # Check if particle is outside domain
+        hit_wall = False
+        wall_position = 0.0
+
+        if x_p < x_min:
+            hit_wall = True
+            wall_position = x_min
+        elif x_p > x_max:
+            hit_wall = True
+            wall_position = x_max
+
+        if not hit_wall:
+            continue
+
+        # Particle hit wall - apply sheath physics
+        is_electron = (species_id[i] == ELECTRON_ID)
+
+        if is_electron:
+            # Calculate electron kinetic energy
+            v_sq = v[i, 0]**2 + v[i, 1]**2 + v[i, 2]**2
+            E_kinetic = 0.5 * m_e * v_sq  # [J]
+
+            # Energy-dependent reflection
+            if E_kinetic < E_barrier:
+                # LOW ENERGY: Reflect (cannot overcome sheath potential)
+                x[i, 0] = 2.0 * wall_position - x_p  # Mirror position
+                v[i, 0] = -v[i, 0]  # Reverse x-velocity
+                n_reflected += 1
+            else:
+                # HIGH ENERGY: Absorb (overcomes sheath, hits wall)
+                active[i] = False
+                n_absorbed += 1
+        else:
+            # ION: Always absorbed (attracted by negative sheath)
+            active[i] = False
+            n_absorbed += 1
+
+    return n_reflected, n_absorbed
+
+
 # ==================== TESTING ====================
 
 if __name__ == "__main__":
